@@ -171,25 +171,24 @@ function generateQR() {
   const ts = Math.floor(Date.now() / 1000);
   const token = ts.toString(36) + Math.random().toString(36).slice(2, 6);
   
-  // Guardamos la info local para el panel del profesor si hiciera falta
   currentToken = { token, materia, profesor, ts };
   
-  // PASO 1: Payload súper comprimido (solo claves esenciales de seguridad)
-  const minPayload = {
-    t: token,
-    s: ts,
-    g: simpleSign(ts + profesor + "6°3ra", CFG.SECRET_KEY)
-  };
+  // 1. Calculamos la firma de seguridad
+  const firma = simpleSign(ts + profesor + "6°3ra", CFG.SECRET_KEY);
   
-  // Convertimos a texto seguro en Base64
-  const textoSeguro = btoa(unescape(encodeURIComponent(JSON.stringify(minPayload))));
+  // 2. Detectamos la URL actual donde está el profe (ya sea localhost o GitHub Pages)
+  // Forzamos el enlace directo a tu entorno de producción en GitHub Pages
+   const urlBase = "https://joakolionel.github.io/asistencia-6-3ra/index.html";
+  
+  // 3. Armamos el link final que va a contener el QR con los parámetros de seguridad
+  const linkConTokens = `${urlBase}?t=${token}&s=${ts}&g=${firma}`;
   
   const qrDiv = document.getElementById("qrcode");
   qrDiv.innerHTML = "";
   
-  // PASO 2: Usar nivel de corrección 'M' para evitar el "code length overflow"
+  // 4. El QR ahora dibuja el LINK REAL, usamos corrección 'M' para que no se desborde
   new QRCode(qrDiv, { 
-    text: textoSeguro, 
+    text: linkConTokens, 
     width: 260, 
     height: 260, 
     colorDark: "#000000", 
