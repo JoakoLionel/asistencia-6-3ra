@@ -57,77 +57,73 @@
 // CONFIGURACIÓN: Poné exactamente la misma URL de Google Apps Script que en el panel docente
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbywe8sagWaCzXwjCN67oPw6cv3K9DQs18xK3RF93JubiPNojivTincxodzafncfGCu8/exec"; 
 
-let html5QrcodeScanner = null;
+// Creamos un objeto global para guardar los tokens de seguridad que vienen en el link
+let seguridadQR = { t: null, s: null, g: null };
 
-function startScanner() {
+// Esta función se ejecuta sola apenas el alumno entra a la página
+window.onload = function() {
+  // Leemos los parámetros (?t=...&s=...&g=...) desde la barra de direcciones del navegador
+  const urlParams = new URLSearchParams(window.location.search);
+  seguridadQR.t = urlParams.get('t');
+  seguridadQR.s = urlParams.get('s');
+  seguridadQR.g = urlParams.get('g');
+
+  // Si falta alguno de los tokens, significa que el alumno entró escribiendo el link a mano
+  // desde su casa o guardó la página en favoritos, por ende, bloqueamos el formulario.
+  if (!seguridadQR.t || !seguridadQR.s || !seguridadQR.g) {
+    document.getElementById("step-1").innerHTML = `
+      <div class="status-msg status-error" style="display:block;">
+        ❌ Acceso denegado. Para dar el presente tenés que estar en el aula y escanear el código QR dinámico del pizarrón.
+      </div>
+    `;
+  }
+};
+
+async function enviarAsistencia() {
   const nombre = document.getElementById("alumno-nombre").value.trim();
   const pc = document.getElementById("alumno-pc").value.trim();
 
   if (!nombre || !pc) {
-    alert("Por favor, completá tu nombre y el número de PC antes de continuar.");
+    alert("Por favor, completá tu nombre y el número de PC.");
     return;
   }
 
-  // Pasamos al contenedor de la cámara
-  document.getElementById("step-1").style.display = "none";
-  document.getElementById("step-2").style.display = "block";
-
-  // Inicializamos la cámara trasera del celular
-  html5QrcodeScanner = new Html5Qrcode("reader");
-  html5QrcodeScanner.start(
-    { facingMode: "environment" }, // Fuerza el uso de la cámara de atrás
-    { fps: 10, qrbox: { width: 250, height: 250 } },
-    onScanSuccess
-  ).catch(err => {
-    showStatus("Error al acceder a la cámara. Dale permisos al navegador.", true);
-  });
-}
-
-async function onScanSuccess(decodedText) {
-  // Frenamos el escáner para que no siga leyendo una vez que encontró el código
-  if(html5QrcodeScanner) {
-    await html5QrcodeScanner.stop();
-  }
-
-  showStatus("Procesando datos del código...", false);
+  const btnEnviar = document.querySelector(".btn");
+  btnEnviar.disabled = true; // Desactivamos el botón para evitar doble clic
+  
+  showStatus("Enviando presente a la base de datos...", false);
 
   try {
-    // Intentamos descifrar el Base64 que viene en el QR
-    const jsonString = decodeURIComponent(escape(atob(decodedText)));
-    const qrData = JSON.parse(jsonString);
-
-    // Verificamos que tenga la estructura de nuestro sistema anti-trampas
-    if (!qrData.t || !qrData.s || !qrData.g) {
-      throw new Error("El código QR escaneado no pertenece a este sistema.");
-    }
-
-    // Preparamos el paquete final para mandar a Google Sheets
+    // Preparamos el paquete con los datos del alumno + los tokens que atrapamos del QR
     const paqueteAsistencia = {
-      nombreAlumno: document.getElementById("alumno-nombre").value.trim(),
-      numeroPC: document.getElementById("alumno-pc").value.trim(),
-      ts: qrData.s, // Mandamos el timestamp original del QR para que el Sheets valide la hora
-      token: qrData.t
+      nombreAlumno: nombre,
+      numeroPC: pc,
+      ts: seguridadQR.s, // El timestamp del QR para que el Sheets valide si no expiró
+      token: seguridadQR.t
     };
 
-    // Enviamos los datos por POST a la API de Google Sheets
-    showStatus("Enviando presente a la base de datos...", false);
-    
-    const respuesta = await fetch(APPS_SCRIPT_URL, {
+    // Enviamos por POST a Google Sheets
+    await fetch(APPS_SCRIPT_URL, {
       method: "POST",
-      mode: "no-cors", // Requerido para Apps Script web apps externas
+      mode: "no-cors",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(paqueteAsistencia)
     });
 
-    // Como usamos 'no-cors', no podemos leer la respuesta JSON directamente,
-    // pero si el fetch no tiró error, es que llegó correctamente.
+    // Ocultamos los campos y mostramos el éxito
+    document.getElementById("alumno-nombre").disabled = true;
+    document.getElementById("alumno-pc").disabled = true;
     showStatus("🎉 ¡Presente guardado con éxito! Ya podés cerrar esta pestaña.", false, true);
 
   } catch (error) {
-    showStatus("❌ Error: " + error.message + ". Volvé a intentar.", true);
-    // Ofrecemos un botón para reiniciar el escáner si falló
-    document.getElementById("step-2").innerHTML += `<button class="btn" onclick="location.reload()">Reintentar</button>`;
+    showStatus("❌ Error al conectar con el servidor. Volvé a intentar.", true);
+    btnEnviar.disabled = false;
   }
+}
+
+// Modificamos el comportamiento del botón del index.html para que ejecute esta función directa
+function startScanner() {
+  enviarAsistencia();
 }
 
 function showStatus(msg, isError, isSuccess = false) {
