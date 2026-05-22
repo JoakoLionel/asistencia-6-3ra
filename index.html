@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Registro de Asistencia - Alumno</title>
-  <!-- Incluimos la librería Tesseract.js para el procesamiento OCR local -->
+  <!-- Librería Tesseract.js para procesamiento OCR local en el celular -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     :root {
@@ -88,42 +88,44 @@
 </div>
 
 <script>
-// !!! REEMPLAZÁ ESTO CON LA URL REAL DE TU GOOGLE APPS SCRIPT !!!
+// !!! REEMPLAZÁ ESTA URL CON LA DE TU NUEVA IMPLEMENTACIÓN EN APPS SCRIPT !!!
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbywe8sagWaCzXwjCN67oPw6cv3K9DQs18xK3RF93JubiPNojivTincxodzafncfGCu8/exec"; 
 
 let seguridadQR = { t: null, s: null, g: null };
 let numeroPcDetectado = "";
 
-// Al cargar la página, extrae los parámetros de la URL de forma inmediata y verifica bloqueos
+// Al cargar la página, se ejecutan los controles de fecha y parámetros de URL
 window.onload = function() {
   const container = document.getElementById("form-container");
 
-  // --- ANTIFRAUDE PARTE 1: Bloqueo Local preventivo ---
+  // --- CONTROL ANTIFRAUDE: Bloqueo dinámico por día ---
+  // Genera una clave única por día (Ej: 'asistencia_enviada_2026-05-22')
   const registroClave = "asistencia_enviada_" + new Date().toISOString().split('T')[0];
+  
   if (localStorage.getItem(registroClave)) {
     container.innerHTML = `
       <h2 style="color: var(--success);">🎉 Registro Finalizado</h2>
-      <p>Ya registraste tu presente el día de hoy. No podés enviar múltiples asistencias desde el mismo dispositivo.</p>
+      <p>Ya registraste tu presente el día de hoy. El sistema se habilitará automáticamente para la próxima clase la semana que viene.</p>
     `;
     return;
   }
 
-  // Captura parámetros (?t=...&s=...&g=...) desde la barra de direcciones
+  // Extracción de parámetros de seguridad del QR
   const urlParams = new URLSearchParams(window.location.search);
   seguridadQR.t = urlParams.get('t');
   seguridadQR.s = urlParams.get('s');
   seguridadQR.g = urlParams.get('g');
 
-  // Si falta alguna credencial en el enlace, bloquea el acceso por completo
+  // Si no se escaneó el QR correcto o faltan tokens, rebota el acceso
   if (!seguridadQR.t || !seguridadQR.s || !seguridadQR.g) {
     container.innerHTML = `
       <h2 style="color: #991b1b;">❌ Acceso Denegado</h2>
-      <p>Para poder registrar tu presencia tenés que estar en el laboratorio y escanear el código QR dinámico que está proyectado.</p>
+      <p>Para poder registrar tu presencia tenés que estar en el laboratorio y escanear el código QR dinámico del profesor.</p>
     `;
     return;
   }
 
-  // Si pasa las validaciones, inyecta la UI limpia sin entrada manual de PC
+  // Si está todo OK y no votó hoy, renderiza la interfaz limpia
   container.innerHTML = `
     <h2>Registro de Asistencia</h2>
     <p>Ingresá tus datos para dar el presente en la materia actual.</p>
@@ -145,7 +147,7 @@ window.onload = function() {
   `;
 };
 
-// --- MÓDULO OCR: Procesar la foto y filtrar patrón tipo "26A" ---
+// --- MÓDULO OCR: Procesamiento de imagen y filtrado alfanumérico (Ej: 26A) ---
 async function procesarFoto(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -155,36 +157,36 @@ async function procesarFoto(event) {
   const btnEnviar = document.getElementById("btn-enviar");
 
   btnFoto.disabled = true;
-  showStatus("⏳ Leyendo el código de la PC... Esperá un momento.", "info");
+  showStatus("⏳ Analizando la etiqueta del equipo... Esperá un momento.", "info");
 
   try {
-    // Escaneo local de la imagen con Tesseract
+    // Tesseract procesa la foto localmente en el dispositivo
     const result = await Tesseract.recognize(file, 'eng');
     
-    // Convertimos a mayúsculas y eliminamos espacios en blanco accidentales
+    // Normalizamos el texto quitando espacios y pasando a mayúsculas
     const textoExtraido = result.data.text.toUpperCase().replace(/\s+/g, '');
     
-    // Expresión regular ajustada para capturar números seguidos de letras opcionales (Ej: 26A)
+    // Expresión regular para detectar números seguidos de letras (como '26A')
     const patronPC = /[0-9]+[A-Z]*/g;
     const coincidencias = textoExtraido.match(patronPC);
 
     if (coincidencias && coincidencias.length > 0) {
-      // Nos quedamos con la coincidencia que tenga un tamaño lógico de etiqueta de PC (2 a 4 caracteres)
+      // Buscamos un código que cumpla con el largo típico de la etiqueta del monitor (entre 2 y 4 caracteres)
       const codigoValido = coincidencias.find(c => c.length >= 2 && c.length <= 4);
 
       if (codigoValido) {
         numeroPcDetectado = codigoValido;
-        inputPc.value = `Equipo: ${numeroPcDetectado}`;
-        showStatus("✅ ¡Equipo reconocido con éxito!", "success");
-        btnEnviar.disabled = false; // Desbloquea el envío definitivo
+        inputPc.value = `Equipo Detectado: ${numeroPcDetectado}`;
+        showStatus("✅ ¡Código de PC reconocido con éxito!", "success");
+        btnEnviar.disabled = false; // Se activa el botón de enviar asistencia
       } else {
-        throw new Error("Formato inválido");
+        throw new Error("Formato de código no válido");
       }
     } else {
-      throw new Error("Sin coincidencias");
+      throw new Error("No se detectaron patrones alfanuméricos");
     }
   } catch (error) {
-    showStatus("⚠️ No se detectó el código de la PC (Ej: 26A). Enfocá bien la etiqueta blanca e intentalo de nuevo.", "error");
+    showStatus("⚠️ No se leyó claramente el código (Ej: 26A). Enfocá bien la etiqueta blanca pegada al monitor e intentalo de nuevo.", "error");
     inputPc.value = "";
     btnEnviar.disabled = true;
   } finally {
@@ -192,18 +194,19 @@ async function procesarFoto(event) {
   }
 }
 
+// --- ENVÍO DE DATOS Y BLOQUEO DEFINITIVO ---
 async function enviarAsistencia() {
   const nombre = document.getElementById("alumno-nombre").value.trim();
   const btn = document.getElementById("btn-enviar");
   const container = document.getElementById("form-container");
 
   if (!nombre || !numeroPcDetectado) {
-    showStatus("⚠️ Por favor, completá tu nombre y validá la PC con una foto.", "error");
+    showStatus("⚠️ Datos incompletos. Completá tu nombre y sacá la foto a la etiqueta.", "error");
     return;
   }
 
   btn.disabled = true;
-  showStatus("⏳ Enviando presente a la base de datos...", "info");
+  showStatus("⏳ Subiendo tu asistencia a la planilla de Google...", "info");
 
   try {
     const paqueteAsistencia = {
@@ -213,7 +216,7 @@ async function enviarAsistencia() {
       token: seguridadQR.t
     };
 
-    // Envío por POST a Google Sheets
+    // Petición POST al Web App de Google Sheets
     await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       mode: "no-cors",
@@ -221,18 +224,18 @@ async function enviarAsistencia() {
       body: JSON.stringify(paqueteAsistencia)
     });
 
-    // --- ANTIFRAUDE PARTE 2: Bloqueo de reenvío definitivo ---
+    // Guardamos el bloqueo diario en el LocalStorage
     const registroClave = "asistencia_enviada_" + new Date().toISOString().split('T')[0];
     localStorage.setItem(registroClave, "true");
 
-    // Destruye el formulario de la pantalla para evitar abusos
+    // Limpieza de interfaz: Muestra pantalla de cierre definitiva
     container.innerHTML = `
       <h2 style="color: var(--success);">🎉 Registro Finalizado</h2>
-      <p>Tu asistencia fue guardada con éxito en Google Sheets. Ya podés cerrar esta pestaña.</p>
+      <p>Tu asistencia fue guardada con éxito en Google Sheets. Ya podés cerrar esta pestaña y comenzar con la clase.</p>
     `;
 
   } catch (error) {
-    showStatus("❌ Error al conectar con el servidor. Intentá de nuevo.", "error");
+    showStatus("❌ Error de comunicación con el servidor. Revisá tu conexión e intentá de nuevo.", "error");
     btn.disabled = false;
   }
 }
