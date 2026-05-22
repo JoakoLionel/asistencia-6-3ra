@@ -3,106 +3,149 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Asistencia 6°3ra — Alumnos</title>
-  <!-- Librería para escanear QR desde el navegador del celular -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <title>Registro de Asistencia - Alumno</title>
   <style>
     :root {
-      --bg: #0a0e1a; --bg2: #111827; --bg3: #1a2235;
-      --accent: #3b82f6; --success: #10b981; --danger: #ef4444;
-      --text: #f1f5f9; --text2: #94a3b8; --border: rgba(255,255,255,0.08);
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #1e293b;
+      --border: #e2e8f0;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; padding: 20px; }
-    .container { max-width: 480px; margin: 0 auto; }
-    h1 { font-size: 20px; text-align: center; margin-bottom: 5px; }
-    .subtitle { text-align: center; font-size: 14px; color: var(--text2); margin-bottom: 24px; }
-    .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 16px; }
-    label { display: block; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; margin-bottom: 6px; }
-    input[type=text] { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 15px; padding: 12px; outline: none; }
-    .btn { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; background: var(--accent); color: white; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; }
-    #reader { width: 100%; border-radius: 12px; overflow: hidden; border: none !important; background: #000; }
-    .status-msg { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 14px; display: none; text-align: center; }
-    .status-success { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
-    .status-error { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 90vh;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+    }
+    h2 { margin-top: 0; color: #0f172a; font-size: 1.5rem; }
+    p { color: #64748b; font-size: 0.95rem; margin-bottom: 20px; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem; }
+    input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-sizing: border-box;
+      font-size: 1rem;
+    }
+    input:focus { outline: 2px solid var(--primary); }
+    .btn {
+      width: 100%;
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: var(--primary-hover); }
+    .btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+    .status-msg {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      display: none;
+      font-weight: 500;
+    }
+    .status-error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .status-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .status-info { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; }
   </style>
 </head>
 <body>
-<div class="container">
-  <h1>Registro de Asistencia</h1>
-  <div class="subtitle">6°3ra — Computación</div>
 
-  <!-- Paso 1: Datos del alumno -->
-  <div class="card" id="step-1">
-    <div style="margin-bottom: 14px;">
-      <label>Nombre y Apellido Completo</label>
-      <input type="text" id="alumno-nombre" placeholder="Ej: Juan Pérez">
-    </div>
-    <div style="margin-bottom: 14px;">
-      <label>Número de Computadora / Equipo</label>
-      <input type="text" id="alumno-pc" placeholder="Ej: PC-05 o Número de etiqueta">
-    </div>
-    <button class="btn" onclick="startScanner()">Siguiente: Escanear QR</button>
-  </div>
-
-  <!-- Paso 2: Escáner de la cámara (oculto al principio) -->
-  <div class="card" id="step-2" style="display: none;">
-    <label style="text-align: center; margin-bottom: 12px;">Escaneá el QR del pizarrón</label>
-    <div id="reader"></div>
-    <div class="status-msg" id="status-box"></div>
-  </div>
+<div class="card" id="form-container">
+  <h2>Validando acceso...</h2>
+  <p>Esperá un momento mientras verificamos los tokens de seguridad.</p>
 </div>
 
 <script>
-// CONFIGURACIÓN: Poné exactamente la misma URL de Google Apps Script que en el panel docente
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbywe8sagWaCzXwjCN67oPw6cv3K9DQs18xK3RF93JubiPNojivTincxodzafncfGCu8/exec"; 
+// !!! REEMPLAZÁ ESTO CON LA URL REAL DE TU GOOGLE APPS SCRIPT !!!
+const APPS_SCRIPT_URL = "PONE_ACA_LA_URL_DE_TU_SCRIPT"; 
 
-// Creamos un objeto global para guardar los tokens de seguridad que vienen en el link
 let seguridadQR = { t: null, s: null, g: null };
 
-// Esta función se ejecuta sola apenas el alumno entra a la página
+// Al cargar la página, extrae los parámetros de la URL de forma inmediata
 window.onload = function() {
-  // Leemos los parámetros (?t=...&s=...&g=...) desde la barra de direcciones del navegador
   const urlParams = new URLSearchParams(window.location.search);
   seguridadQR.t = urlParams.get('t');
   seguridadQR.s = urlParams.get('s');
   seguridadQR.g = urlParams.get('g');
 
-  // Si falta alguno de los tokens, significa que el alumno entró escribiendo el link a mano
-  // desde su casa o guardó la página en favoritos, por ende, bloqueamos el formulario.
+  const container = document.getElementById("form-container");
+
+  // Si falta alguna credencial en el enlace, bloquea el acceso
   if (!seguridadQR.t || !seguridadQR.s || !seguridadQR.g) {
-    document.getElementById("step-1").innerHTML = `
-      <div class="status-msg status-error" style="display:block;">
-        ❌ Acceso denegado. Para dar el presente tenés que estar en el aula y escanear el código QR dinámico del pizarrón.
-      </div>
+    container.innerHTML = `
+      <h2 style="color: #991b1b;">❌ Acceso Denegado</h2>
+      <p>Para poder registrar tu presencia tenés que escanear el código QR dinámico que está proyectado en el aula.</p>
     `;
+    return;
   }
+
+  // Si los tokens existen, le muestra al alumno el formulario directo sin intermediarios
+  container.innerHTML = `
+    <h2>Registro de Asistencia</h2>
+    <p>Ingresá tus datos para dar el presente en la materia actual.</p>
+    
+    <div class="form-group">
+      <label for="alumno-nombre">Nombre y Apellido completo:</label>
+      <input type="text" id="alumno-nombre" placeholder="Ej: Juan Pérez">
+    </div>
+    
+    <div class="form-group">
+      <label for="alumno-pc">Número de PC asignada:</label>
+      <input type="number" id="alumno-pc" placeholder="Ej: 14" min="1">
+    </div>
+    
+    <button class="btn" id="btn-enviar" onclick="enviarAsistencia()">Registrar Presente</button>
+    <div id="status-box" class="status-msg"></div>
+  `;
 };
 
 async function enviarAsistencia() {
   const nombre = document.getElementById("alumno-nombre").value.trim();
   const pc = document.getElementById("alumno-pc").value.trim();
+  const btn = document.getElementById("btn-enviar");
 
   if (!nombre || !pc) {
-    alert("Por favor, completá tu nombre y el número de PC.");
+    showStatus("⚠️ Por favor, completá tu nombre y el número de PC.", "error");
     return;
   }
 
-  const btnEnviar = document.querySelector(".btn");
-  btnEnviar.disabled = true; // Desactivamos el botón para evitar doble clic
-  
-  showStatus("Enviando presente a la base de datos...", false);
+  btn.disabled = true;
+  showStatus("⏳ Enviando presente a la base de datos...", "info");
 
   try {
-    // Preparamos el paquete con los datos del alumno + los tokens que atrapamos del QR
     const paqueteAsistencia = {
       nombreAlumno: nombre,
       numeroPC: pc,
-      ts: seguridadQR.s, // El timestamp del QR para que el Sheets valide si no expiró
+      ts: seguridadQR.s,
       token: seguridadQR.t
     };
 
-    // Enviamos por POST a Google Sheets
+    // Envío de datos al Web App de Google Sheets
     await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       mode: "no-cors",
@@ -110,28 +153,24 @@ async function enviarAsistencia() {
       body: JSON.stringify(paqueteAsistencia)
     });
 
-    // Ocultamos los campos y mostramos el éxito
+    // Éxito completo: Deshabilitamos el formulario
     document.getElementById("alumno-nombre").disabled = true;
     document.getElementById("alumno-pc").disabled = true;
-    showStatus("🎉 ¡Presente guardado con éxito! Ya podés cerrar esta pestaña.", false, true);
+    showStatus("🎉 ¡Presente guardado con éxito! Ya podés cerrar esta pestaña.", "success");
 
   } catch (error) {
-    showStatus("❌ Error al conectar con el servidor. Volvé a intentar.", true);
-    btnEnviar.disabled = false;
+    showStatus("❌ Error al conectar con el servidor. Intentá de nuevo.", "error");
+    btn.disabled = false;
   }
 }
 
-// Modificamos el comportamiento del botón del index.html para que ejecute esta función directa
-function startScanner() {
-  enviarAsistencia();
-}
-
-function showStatus(msg, isError, isSuccess = false) {
+function showStatus(msg, tipo) {
   const box = document.getElementById("status-box");
   box.innerText = msg;
   box.style.display = "block";
-  box.className = "status-msg " + (isError ? "status-error" : isSuccess ? "status-success" : "");
+  box.className = `status-msg status-${tipo}`;
 }
 </script>
+
 </body>
 </html>
