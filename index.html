@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Asistencia 6°3ra — Alumnos</title>
+  <!-- Librería para escanear QR desde el navegador del celular -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    :root {
+      --bg: #0a0e1a; --bg2: #111827; --bg3: #1a2235;
+      --accent: #3b82f6; --success: #10b981; --danger: #ef4444;
+      --text: #f1f5f9; --text2: #94a3b8; --border: rgba(255,255,255,0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; padding: 20px; }
+    .container { max-width: 480px; margin: 0 auto; }
+    h1 { font-size: 20px; text-align: center; margin-bottom: 5px; }
+    .subtitle { text-align: center; font-size: 14px; color: var(--text2); margin-bottom: 24px; }
+    .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+    label { display: block; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; margin-bottom: 6px; }
+    input[type=text] { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 15px; padding: 12px; outline: none; }
+    .btn { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; background: var(--accent); color: white; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; }
+    #reader { width: 100%; border-radius: 12px; overflow: hidden; border: none !important; background: #000; }
+    .status-msg { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 14px; display: none; text-align: center; }
+    .status-success { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+    .status-error { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Registro de Asistencia</h1>
+  <div class="subtitle">6°3ra — Computación</div>
+
+  <!-- Paso 1: Datos del alumno -->
+  <div class="card" id="step-1">
+    <div style="margin-bottom: 14px;">
+      <label>Nombre y Apellido Completo</label>
+      <input type="text" id="alumno-nombre" placeholder="Ej: Juan Pérez">
+    </div>
+    <div style="margin-bottom: 14px;">
+      <label>Número de Computadora / Equipo</label>
+      <input type="text" id="alumno-pc" placeholder="Ej: PC-05 o Número de etiqueta">
+    </div>
+    <button class="btn" onclick="startScanner()">Siguiente: Escanear QR</button>
+  </div>
+
+  <!-- Paso 2: Escáner de la cámara (oculto al principio) -->
+  <div class="card" id="step-2" style="display: none;">
+    <label style="text-align: center; margin-bottom: 12px;">Escaneá el QR del pizarrón</label>
+    <div id="reader"></div>
+    <div class="status-msg" id="status-box"></div>
+  </div>
+</div>
+
+<script>
+// CONFIGURACIÓN: Poné exactamente la misma URL de Google Apps Script que en el panel docente
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbywe8sagWaCzXwjCN67oPw6cv3K9DQs18xK3RF93JubiPNojivTincxodzafncfGCu8/exec"; 
+
+let html5QrcodeScanner = null;
+
+function startScanner() {
+  const nombre = document.getElementById("alumno-nombre").value.trim();
+  const pc = document.getElementById("alumno-pc").value.trim();
+
+  if (!nombre || !pc) {
+    alert("Por favor, completá tu nombre y el número de PC antes de continuar.");
+    return;
+  }
+
+  // Pasamos al contenedor de la cámara
+  document.getElementById("step-1").style.display = "none";
+  document.getElementById("step-2").style.display = "block";
+
+  // Inicializamos la cámara trasera del celular
+  html5QrcodeScanner = new Html5Qrcode("reader");
+  html5QrcodeScanner.start(
+    { facingMode: "environment" }, // Fuerza el uso de la cámara de atrás
+    { fps: 10, qrbox: { width: 250, height: 250 } },
+    onScanSuccess
+  ).catch(err => {
+    showStatus("Error al acceder a la cámara. Dale permisos al navegador.", true);
+  });
+}
+
+async function onScanSuccess(decodedText) {
+  // Frenamos el escáner para que no siga leyendo una vez que encontró el código
+  if(html5QrcodeScanner) {
+    await html5QrcodeScanner.stop();
+  }
+
+  showStatus("Procesando datos del código...", false);
+
+  try {
+    // Intentamos descifrar el Base64 que viene en el QR
+    const jsonString = decodeURIComponent(escape(atob(decodedText)));
+    const qrData = JSON.parse(jsonString);
+
+    // Verificamos que tenga la estructura de nuestro sistema anti-trampas
+    if (!qrData.t || !qrData.s || !qrData.g) {
+      throw new Error("El código QR escaneado no pertenece a este sistema.");
+    }
+
+    // Preparamos el paquete final para mandar a Google Sheets
+    const paqueteAsistencia = {
+      nombreAlumno: document.getElementById("alumno-nombre").value.trim(),
+      numeroPC: document.getElementById("alumno-pc").value.trim(),
+      ts: qrData.s, // Mandamos el timestamp original del QR para que el Sheets valide la hora
+      token: qrData.t
+    };
+
+    // Enviamos los datos por POST a la API de Google Sheets
+    showStatus("Enviando presente a la base de datos...", false);
+    
+    const respuesta = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors", // Requerido para Apps Script web apps externas
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(paqueteAsistencia)
+    });
+
+    // Como usamos 'no-cors', no podemos leer la respuesta JSON directamente,
+    // pero si el fetch no tiró error, es que llegó correctamente.
+    showStatus("🎉 ¡Presente guardado con éxito! Ya podés cerrar esta pestaña.", false, true);
+
+  } catch (error) {
+    showStatus("❌ Error: " + error.message + ". Volvé a intentar.", true);
+    // Ofrecemos un botón para reiniciar el escáner si falló
+    document.getElementById("step-2").innerHTML += `<button class="btn" onclick="location.reload()">Reintentar</button>`;
+  }
+}
+
+function showStatus(msg, isError, isSuccess = false) {
+  const box = document.getElementById("status-box");
+  box.innerText = msg;
+  box.style.display = "block";
+  box.className = "status-msg " + (isError ? "status-error" : isSuccess ? "status-success" : "");
+}
+</script>
+</body>
+</html>
