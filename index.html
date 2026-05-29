@@ -88,19 +88,47 @@
 </div>
 
 <script>
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwznn3--nhkBaAp_x2mFDom9lG0FVOnfvQnGC_U5JpiC9sI0MQ2_g5CvLAkzLcBY2bS/exec"; 
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwznn3--nhkBaAp_x2mFDom9lG0FVOnfvQnGC_U5JpiC9sI0MQ2_g5CvLAkzLcBY2bS/exec";
 
-let seguridadQR = { t: null, s: null, g: null };
+// ── CONSTANTES DE SEGURIDAD ────────────────────────────────
+// Debe coincidir con CFG.QR_SECS del panel docente
+const QR_VALIDITY_SECS   = 30;
+// Radio máximo permitido desde la ubicación del profesor (metros)
+const DISTANCIA_MAX_METROS = 300;
+
+let seguridadQR = { t: null, s: null, g: null, lat: null, lon: null };
 let numeroPcDetectado = "";
 
-// Al cargar la página, se ejecutan los controles de fecha y parámetros de URL
-window.onload = function() {
+// ── UTILIDADES DE GEOLOCALIZACIÓN ──────────────────────────
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function obtenerPosicion() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject({ code: 99, message: "GPS no disponible en este dispositivo." });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  });
+}
+
+// ── INICIALIZACIÓN CON TODAS LAS VALIDACIONES ──────────────
+window.onload = async function () {
   const container = document.getElementById("form-container");
 
   // --- CONTROL ANTIFRAUDE: Bloqueo dinámico por día ---
-  // Genera una clave única por día (Ej: 'asistencia_enviada_2026-05-22')
   const registroClave = "asistencia_enviada_" + new Date().toISOString().split('T')[0];
-  
   if (localStorage.getItem(registroClave)) {
     container.innerHTML = `
       <h2 style="color: var(--success);">🎉 Registro Finalizado</h2>
@@ -109,14 +137,16 @@ window.onload = function() {
     return;
   }
 
-  // Extracción de parámetros de seguridad del QR
+  // Extracción de parámetros de seguridad del QR (ahora incluye lat/lon del profesor)
   const urlParams = new URLSearchParams(window.location.search);
-  seguridadQR.t = urlParams.get('t');
-  seguridadQR.s = urlParams.get('s');
-  seguridadQR.g = urlParams.get('g');
+  seguridadQR.t   = urlParams.get('t');
+  seguridadQR.s   = urlParams.get('s');
+  seguridadQR.g   = urlParams.get('g');
+  seguridadQR.lat = urlParams.get('lat');
+  seguridadQR.lon = urlParams.get('lon');
 
-  // Si no se escaneó el QR correcto o faltan tokens, rebota el acceso
-  if (!seguridadQR.t || !seguridadQR.s || !seguridadQR.g) {
+  // Si faltan parámetros del QR, denegar acceso
+  if (!seguridadQR.t || !seguridadQR.s || !seguridadQR.g || !seguridadQR.lat || !seguridadQR.lon) {
     container.innerHTML = `
       <h2 style="color: #991b1b;">❌ Acceso Denegado</h2>
       <p>Para poder registrar tu presencia tenés que estar en el laboratorio y escanear el código QR dinámico del profesor.</p>
@@ -124,79 +154,196 @@ window.onload = function() {
     return;
   }
 
-  // Si está todo OK y no votó hoy, renderiza la interfaz limpia
+  // --- FIX: VALIDACIÓN DE EXPIRACIÓN DEL QR (30 segundos) ---
+  const ahora  = Math.floor(Date.now() / 1000);
+  const edadQR = ahora - parseInt(seguridadQR.s);
+  if (edadQR < 0 || edadQR > QR_VALIDITY_SECS) {
+    container.innerHTML = `
+      <h2 style="color: #991b1b;">⏱️ QR Expirado</h2>
+      <p>El código QR ya no es válido (tenía ${edadQR}s de antigüedad). Pedile al profesor que muestre el nuevo código y volvé a escanearlo.</p>
+    `;
+    return;
+  }
+
+  // --- FIX: VALIDACIÓN DE GEOLOCALIZACIÓN ---
+  const profeLat = parseFloat(seguridadQR.lat);
+  const profeLon = parseFloat(seguridadQR.lon);
+
+  if (isNaN(profeLat) || isNaN(profeLon)) {
+    container.innerHTML = `
+      <h2 style="color: #991b1b;">❌ QR Inválido</h2>
+      <p>El código QR no contiene datos de ubicación. Pedile al profesor que genere un nuevo QR con el GPS activo.</p>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <h2>Verificando ubicación...</h2>
+    <p>📍 Necesitamos confirmar que estás presente en el aula. Aceptá el permiso de ubicación cuando te lo pida el navegador.</p>
+  `;
+
+  try {
+    const pos       = await obtenerPosicion();
+    const distancia = haversine(pos.coords.latitude, pos.coords.longitude, profeLat, profeLon);
+
+    if (distancia > DISTANCIA_MAX_METROS) {
+      container.innerHTML = `
+        <h2 style="color: #991b1b;">📍 Fuera del Aula</h2>
+        <p>Estás a <strong>${Math.round(distancia)} metros</strong> del aula. Solo podés registrar tu presencia si estás físicamente en el laboratorio (máximo ${DISTANCIA_MAX_METROS}m).</p>
+      `;
+      return;
+    }
+
+    // ✅ Todas las validaciones pasaron: mostrar formulario
+    renderizarFormulario();
+
+  } catch (err) {
+    let msgError = "No pudimos obtener tu ubicación. Verificá que el GPS esté activo y recargá la página.";
+    if (err.code === 1) msgError = "Denegaste el permiso de ubicación. Habilitá el GPS en tu navegador y recargá la página.";
+    else if (err.code === 2) msgError = "No se pudo detectar tu posición GPS. Asegurate de tener el GPS activo.";
+    else if (err.code === 3) msgError = "Tiempo agotado al obtener la ubicación. Verificá tu señal GPS y recargá la página.";
+
+    container.innerHTML = `
+      <h2 style="color: #991b1b;">📍 Error de Ubicación</h2>
+      <p>${msgError}</p>
+    `;
+  }
+};
+
+function renderizarFormulario() {
+  const container = document.getElementById("form-container");
   container.innerHTML = `
     <h2>Registro de Asistencia</h2>
     <p>Ingresá tus datos para dar el presente en la materia actual.</p>
-    
+
     <div class="form-group">
       <label for="alumno-nombre">Nombre y Apellido completo:</label>
       <input type="text" id="alumno-nombre" placeholder="Ej: Juan Pérez">
     </div>
-    
+
     <div class="form-group">
       <label>Equipo asignado (Captura Requerida):</label>
       <input type="text" id="alumno-pc" placeholder="Hacé clic abajo para tomar foto" readonly>
       <input type="file" id="file-input" accept="image/*" capture="environment" style="display: none;" onchange="procesarFoto(event)">
       <button class="btn btn-secondary" id="btn-foto" onclick="document.getElementById('file-input').click()" style="margin-top: 8px;">📷 Sacar foto al número de PC</button>
     </div>
-    
+
     <button class="btn" id="btn-enviar" onclick="enviarAsistencia()" disabled>Registrar Presente</button>
     <div id="status-box" class="status-msg"></div>
   `;
-};
+}
 
-// --- MÓDULO OCR: Procesamiento de imagen y filtrado alfanumérico (Ej: 26A) ---
+// ── FIX OCR: PREPROCESAMIENTO DE IMAGEN ───────────────────
+// Escala 3x + escala de grises + binarización para maximizar
+// la precisión de Tesseract en etiquetas de fondo blanco/texto negro
+function preprocesarImagen(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = function () {
+      const ESCALA = 3;
+      const canvas = document.createElement('canvas');
+      const ctx    = canvas.getContext('2d');
+      canvas.width  = img.naturalWidth  * ESCALA;
+      canvas.height = img.naturalHeight * ESCALA;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      // Escala de grises + binarización de alto contraste (umbral 140/255)
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        const val  = luma > 140 ? 255 : 0;
+        data[i] = data[i + 1] = data[i + 2] = val;
+        data[i + 3] = 255;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => resolve(blob), 'image/png');
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
+// Extrae el código de PC del texto OCR (ej: "26A", "11A")
+function extraerCodigo(text) {
+  const limpio = text.toUpperCase().replace(/\s+/g, '').replace(/[^0-9A-Z]/g, '');
+  // Prioriza: 1-3 dígitos + una letra mayúscula (formato estándar de etiquetas)
+  const conLetra  = limpio.match(/\d{1,3}[A-Z]/g);
+  const soloNum   = limpio.match(/\d{2,3}/g);
+  const candidatos = conLetra || soloNum || [];
+  return candidatos.find(c => c.length >= 2 && c.length <= 4) || null;
+}
+
+// ── FIX OCR: MÓDULO PRINCIPAL CON WORKER Y 3 INTENTOS ─────
 async function procesarFoto(event) {
   const file = event.target.files[0];
   if (!file) return;
 
-  const btnFoto = document.getElementById("btn-foto");
-  const inputPc = document.getElementById("alumno-pc");
+  const btnFoto   = document.getElementById("btn-foto");
+  const inputPc   = document.getElementById("alumno-pc");
   const btnEnviar = document.getElementById("btn-enviar");
 
   btnFoto.disabled = true;
   showStatus("⏳ Analizando la etiqueta del equipo... Esperá un momento.", "info");
 
+  let worker = null;
   try {
-    // Tesseract procesa la foto localmente en el dispositivo
-    const result = await Tesseract.recognize(file, 'eng');
-    
-    // Normalizamos el texto quitando espacios y pasando a mayúsculas
-    const textoExtraido = result.data.text.toUpperCase().replace(/\s+/g, '');
-    
-    // Expresión regular para detectar números seguidos de letras
-    const patronPC = /[0-9]+[A-Z]*/g;
-    const coincidencias = textoExtraido.match(patronPC);
+    // Preprocesar imagen para mejorar calidad OCR
+    const imagenProcesada = await preprocesarImagen(file);
 
-    if (coincidencias && coincidencias.length > 0) {
-      // Buscamos un código que cumpla con el largo típico de la etiqueta del monitor (entre 2 y 4 caracteres)
-      const codigoValido = coincidencias.find(c => c.length >= 2 && c.length <= 4);
+    // Crear worker UNA vez para reutilizarlo en todos los intentos
+    worker = await Tesseract.createWorker('eng');
+    // Limitar caracteres reconocidos solo a los válidos en las etiquetas
+    await worker.setParameters({
+      tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+    });
 
-      if (codigoValido) {
-        numeroPcDetectado = codigoValido;
-        inputPc.value = `Equipo Detectado: ${numeroPcDetectado}`;
-        showStatus("✅ ¡Código de PC reconocido con éxito!", "success");
-        btnEnviar.disabled = false; // Se activa el botón de enviar asistencia
-      } else {
-        throw new Error("Formato de código no válido");
-      }
-    } else {
-      throw new Error("No se detectaron patrones alfanuméricos");
+    let codigo = null;
+
+    // Intento 1: imagen procesada + PSM 7 (línea de texto única) ← más preciso
+    await worker.setParameters({ tessedit_pageseg_mode: '7' });
+    const { data: { text: t1 } } = await worker.recognize(imagenProcesada);
+    codigo = extraerCodigo(t1);
+
+    // Intento 2: imagen procesada + PSM 8 (palabra única)
+    if (!codigo) {
+      await worker.setParameters({ tessedit_pageseg_mode: '8' });
+      const { data: { text: t2 } } = await worker.recognize(imagenProcesada);
+      codigo = extraerCodigo(t2);
     }
+
+    // Intento 3 (último recurso): imagen original sin preprocesar + PSM 7
+    if (!codigo) {
+      await worker.setParameters({ tessedit_pageseg_mode: '7' });
+      const { data: { text: t3 } } = await worker.recognize(file);
+      codigo = extraerCodigo(t3);
+    }
+
+    if (codigo) {
+      numeroPcDetectado = codigo;
+      inputPc.value     = `Equipo Detectado: ${numeroPcDetectado}`;
+      showStatus("✅ ¡Código de PC reconocido con éxito!", "success");
+      btnEnviar.disabled = false;
+    } else {
+      throw new Error("No se detectó ningún código válido en la imagen.");
+    }
+
   } catch (error) {
     showStatus("⚠️ No se leyó claramente el código (Ej: 26A). Enfocá bien la etiqueta blanca pegada al monitor e intentalo de nuevo.", "error");
-    inputPc.value = "";
+    inputPc.value      = "";
     btnEnviar.disabled = true;
   } finally {
+    if (worker) await worker.terminate();
     btnFoto.disabled = false;
   }
 }
 
-// --- ENVÍO DE DATOS Y BLOQUEO DEFINITIVO ---
+// ── ENVÍO DE DATOS Y BLOQUEO DEFINITIVO ───────────────────
 async function enviarAsistencia() {
-  const nombre = document.getElementById("alumno-nombre").value.trim();
-  const btn = document.getElementById("btn-enviar");
+  const nombre    = document.getElementById("alumno-nombre").value.trim();
+  const btn       = document.getElementById("btn-enviar");
   const container = document.getElementById("form-container");
 
   if (!nombre || !numeroPcDetectado) {
@@ -210,17 +357,17 @@ async function enviarAsistencia() {
   try {
     const paqueteAsistencia = {
       nombreAlumno: nombre,
-      numeroPC: numeroPcDetectado,
-      ts: seguridadQR.s,
-      token: seguridadQR.t
+      numeroPC:     numeroPcDetectado,
+      ts:           seguridadQR.s,
+      token:        seguridadQR.t
     };
 
     // Petición POST al Web App de Google Sheets
     await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      mode: "no-cors",
+      method:  "POST",
+      mode:    "no-cors",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(paqueteAsistencia)
+      body:    JSON.stringify(paqueteAsistencia)
     });
 
     // Guardamos el bloqueo diario en el LocalStorage
@@ -241,9 +388,10 @@ async function enviarAsistencia() {
 
 function showStatus(msg, tipo) {
   const box = document.getElementById("status-box");
-  box.innerText = msg;
+  if (!box) return;
+  box.innerText   = msg;
   box.style.display = "block";
-  box.className = `status-msg status-${tipo}`;
+  box.className   = `status-msg status-${tipo}`;
 }
 </script>
 

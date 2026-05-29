@@ -6,7 +6,6 @@
   <title>Panel Docente — 6°3ra Computación</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
- 
     :root { --bg: #0a0e1a; --bg2: #111827; --bg3: #1a2235; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --warning: #f59e0b; --text: #f1f5f9; --text2: #94a3b8; --border: rgba(255,255,255,0.08); --radius: 16px; --radius-sm: 10px; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; padding: 0 0 60px; }
@@ -90,7 +89,7 @@
       <label>Nombre del docente</label>
       <input type="text" id="p-profesor" placeholder="Ej: Prof. González"/>
     </div>
-    <button class="btn btn-primary" onclick="generateQR()">Generar QR de clase</button>
+    <button class="btn btn-primary" id="btn-generar" onclick="generateQR()">Generar QR de clase</button>
   </div>
 
   <div class="card" id="qr-card" style="display:none;">
@@ -101,7 +100,7 @@
           <circle class="ring-bg" cx="40" cy="40" r="34"/>
           <circle class="ring-fill" id="ring" cx="40" cy="40" r="34" stroke-dasharray="213.6" stroke-dashoffset="0"/>
         </svg>
-        <span class="label" id="countdown-num">90</span>
+        <span class="label" id="countdown-num">30</span>
       </div>
     </div>
     <div id="qr-display">
@@ -135,16 +134,21 @@
 </div>
 
 <script>
-// CONFIGURACIÓN CLAVE
+// ── CONFIGURACIÓN ─────────────────────────────────────────
 const CFG = {
-  SECRET_KEY: "CLAVE_SECRETA_63RA", // La misma que pondremos en Google Apps Script
-  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbwznn3--nhkBaAp_x2mFDom9lG0FVOnfvQnGC_U5JpiC9sI0MQ2_g5CvLAkzLcBY2bS/exec", 
-  QR_SECS: 90,
-  USERS: { "profe": "1234" } // Contraseña simple de prueba
+  SECRET_KEY:      "CLAVE_SECRETA_63RA",
+  APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbwznn3--nhkBaAp_x2mFDom9lG0FVOnfvQnGC_U5JpiC9sI0MQ2_g5CvLAkzLcBY2bS/exec",
+  QR_SECS: 30,           // ← FIX: Cambiado de 90 a 30 segundos
+  USERS: { "profe": "1234" }
 };
 
-let countdownInterval = null; let autoRenewInterval = null; let currentToken = null; let countdownLeft = 0;
+let countdownInterval = null;
+let autoRenewInterval = null;
+let currentToken      = null;
+let countdownLeft     = 0;
+let autoRenewActivo   = false; // Controla si la auto-renovación está activa
 
+// ── LOGIN ─────────────────────────────────────────────────
 function doLogin() {
   const u = document.getElementById("login-user").value.trim();
   const p = document.getElementById("login-pass").value;
@@ -158,6 +162,7 @@ function doLogin() {
   }
 }
 
+// ── FIRMA DE SEGURIDAD ────────────────────────────────────
 function simpleSign(data, key) {
   let h = 0;
   for (let i = 0; i < data.length; i++) h = (Math.imul(31, h) + data.charCodeAt(i)) | 0;
@@ -165,76 +170,121 @@ function simpleSign(data, key) {
   return (h >>> 0).toString(16);
 }
 
-function generateQR() {
-  const materia = document.getElementById("p-materia").value || "Materia";
-  const profesor = document.getElementById("p-profesor").value || "Docente";
-  const ts = Math.floor(Date.now() / 1000);
-  const token = ts.toString(36) + Math.random().toString(36).slice(2, 6);
-  
-  currentToken = { token, materia, profesor, ts };
-  
-  // 1. Calculamos la firma de seguridad
-  const firma = simpleSign(ts + profesor + "6°3ra", CFG.SECRET_KEY);
-  
-  // 2. Detectamos la URL actual donde está el profe (ya sea localhost o GitHub Pages)
-  // Forzamos el enlace directo a tu entorno de producción en GitHub Pages
-   const urlBase = "https://joakolionel.github.io/asistencia-6-3ra/index.html";
-  
-  // 3. Armamos el link final que va a contener el QR con los parámetros de seguridad
-  const linkConTokens = `${urlBase}?t=${token}&s=${ts}&g=${firma}`;
-  
-  const qrDiv = document.getElementById("qrcode");
-  qrDiv.innerHTML = "";
-  
-  // 4. El QR ahora dibuja el LINK REAL, usamos corrección 'M' para que no se desborde
-  new QRCode(qrDiv, { 
-    text: linkConTokens, 
-    width: 260, 
-    height: 260, 
-    colorDark: "#000000", 
-    colorLight: "#ffffff", 
-    correctLevel: QRCode.CorrectLevel.M 
-  });
-  
-  document.getElementById("exp-overlay").style.display = "none";
-  document.getElementById("qr-card").style.display = "block";
-  
-  clearInterval(countdownInterval); 
-  countdownLeft = CFG.QR_SECS; 
-  updateCountdown();
-  
-  countdownInterval = setInterval(() => {
-    countdownLeft--; 
-    updateCountdown();
-    if (countdownLeft <= 0) { 
-      clearInterval(countdownInterval); 
-      document.getElementById("exp-overlay").style.display = "flex"; 
+// ── FIX: GEOLOCALIZACIÓN DEL DOCENTE ─────────────────────
+// maximumAge: 60000 → usa caché de hasta 60s para que las
+// regeneraciones automáticas cada 30s sean casi instantáneas
+function obtenerUbicacionDocente() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("GPS no disponible en este dispositivo."));
+      return;
     }
-  }, 1000);
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout:    15000,
+      maximumAge: 60000
+    });
+  });
 }
+
+// ── FIX: GENERACIÓN DE QR CON UBICACIÓN + AUTO-RENOVACIÓN ─
+async function generateQR() {
+  const materia  = document.getElementById("p-materia").value  || "Materia";
+  const profesor = document.getElementById("p-profesor").value || "Docente";
+  const btnGen   = document.getElementById("btn-generar");
+
+  // Feedback visual mientras obtiene GPS
+  if (btnGen) btnGen.textContent = "📍 Obteniendo ubicación...";
+
+  try {
+    // FIX: Obtener ubicación del docente para embedder en el QR
+    const pos = await obtenerUbicacionDocente();
+    const lat  = pos.coords.latitude;
+    const lon  = pos.coords.longitude;
+
+    const ts    = Math.floor(Date.now() / 1000);
+    const token = ts.toString(36) + Math.random().toString(36).slice(2, 6);
+
+    currentToken = { token, materia, profesor, ts, lat, lon };
+
+    // FIX: La firma ahora incluye lat/lon para evitar manipulación del link
+    const firma = simpleSign(
+      ts + profesor + "6°3ra" + lat.toFixed(5) + lon.toFixed(5),
+      CFG.SECRET_KEY
+    );
+
+    const urlBase = "https://joakolionel.github.io/asistencia-6-3ra/index.html";
+    // FIX: El QR lleva lat/lon del docente → alumno valida que está en el aula
+    const linkConTokens = `${urlBase}?t=${token}&s=${ts}&g=${firma}&lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`;
+
+    const qrDiv = document.getElementById("qrcode");
+    qrDiv.innerHTML = "";
+    new QRCode(qrDiv, {
+      text:          linkConTokens,
+      width:         260,
+      height:        260,
+      colorDark:     "#000000",
+      colorLight:    "#ffffff",
+      correctLevel:  QRCode.CorrectLevel.M
+    });
+
+    document.getElementById("exp-overlay").style.display = "none";
+    document.getElementById("qr-card").style.display     = "block";
+
+    // FIX: Countdown de 30s con AUTO-RENOVACIÓN al llegar a 0
+    clearInterval(countdownInterval);
+    countdownLeft = CFG.QR_SECS;
+    updateCountdown();
+
+    countdownInterval = setInterval(() => {
+      countdownLeft--;
+      updateCountdown();
+      if (countdownLeft <= 0) {
+        clearInterval(countdownInterval);
+        generateQR(); // ← FIX: Se regenera solo, sin intervención del docente
+      }
+    }, 1000);
+
+    if (btnGen) btnGen.textContent = "Generar QR de clase";
+
+  } catch (err) {
+    if (btnGen) btnGen.textContent = "Generar QR de clase";
+    alert(
+      "⚠️ No se pudo obtener la ubicación GPS.\n\n" +
+      "Habilitá el GPS en tu dispositivo e intentá de nuevo.\n" +
+      "(El GPS es necesario para que los alumnos verifiquen que están presentes en el aula.)"
+    );
+  }
+}
+
 function updateCountdown() {
   document.getElementById("countdown-num").textContent = countdownLeft;
   const ring = document.getElementById("ring");
-  const pct = countdownLeft / CFG.QR_SECS;
+  const pct  = countdownLeft / CFG.QR_SECS;
   ring.style.strokeDashoffset = 213.6 * (1 - pct);
   ring.style.stroke = pct > 0.5 ? "#10b981" : pct > 0.25 ? "#f59e0b" : "#ef4444";
 }
 
+// FIX: autoRenew ahora solo fuerza una regeneración inmediata;
+// la renovación automática ya está integrada en el countdown.
 function autoRenew() {
-  clearInterval(autoRenewInterval);
-  autoRenewInterval = setInterval(() => generateQR(), (CFG.QR_SECS) * 1000);
+  clearInterval(countdownInterval);
   generateQR();
 }
 
+// ── ESTADÍSTICAS EN TIEMPO REAL ───────────────────────────
 async function refreshStats() {
-  if(!CFG.APPS_SCRIPT_URL.includes("script.google.com")) return alert("Falta configurar APPS_SCRIPT_URL");
+  if (!CFG.APPS_SCRIPT_URL.includes("script.google.com")) {
+    return alert("Falta configurar APPS_SCRIPT_URL");
+  }
   try {
-    const res = await fetch(CFG.APPS_SCRIPT_URL + "?action=list");
+    const res     = await fetch(CFG.APPS_SCRIPT_URL + "?action=list");
     const records = await res.json();
     document.getElementById("s-presentes").textContent = records.length;
     const tbody = document.getElementById("att-body");
-    if (!records.length) return tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:20px;">Sin registros</td></tr>';
-    
+    if (!records.length) {
+      return tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:20px;">Sin registros</td></tr>';
+    }
     tbody.innerHTML = records.map(r => `
       <tr>
         <td>${r.alumno}</td>
@@ -243,7 +293,9 @@ async function refreshStats() {
         <td><span class="badge-ok">✓ Presente</span></td>
       </tr>
     `).join("");
-  } catch(e) { console.error("Error cargando:", e); }
+  } catch (e) {
+    console.error("Error cargando estadísticas:", e);
+  }
 }
 </script>
 </body>
