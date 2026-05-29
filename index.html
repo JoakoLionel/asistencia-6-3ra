@@ -236,7 +236,7 @@ function renderizarFormulario() {
 // ── FIX OCR: PREPROCESAMIENTO DE IMAGEN ───────────────────
 // Escala 3x + escala de grises + binarización para maximizar
 // la precisión de Tesseract en etiquetas de fondo blanco/texto negro
-function preprocesarImagen(file) {
+/*function preprocesarImagen(file) {
   return new Promise((resolve) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -264,7 +264,7 @@ function preprocesarImagen(file) {
     img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
     img.src = url;
   });
-}
+}*/
 
 // Extrae el código de PC del texto OCR (ej: "26A", "11A")
 function extraerCodigo(text) {
@@ -276,7 +276,7 @@ function extraerCodigo(text) {
   return candidatos.find(c => c.length >= 2 && c.length <= 4) || null;
 }
 
-// ── FIX OCR: MÓDULO PRINCIPAL CON WORKER Y 3 INTENTOS ─────
+// ── MÓDULO OCR: ÚNICO INTENTO DIRECTO PARA EVITAR FALLAS ──
 async function procesarFoto(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -286,40 +286,22 @@ async function procesarFoto(event) {
   const btnEnviar = document.getElementById("btn-enviar");
 
   btnFoto.disabled = true;
-  showStatus("⏳ Analizando la etiqueta del equipo... Esperá un momento.", "info");
+  showStatus("⏳ Analizando la foto del equipo... Esperá un momento.", "info");
 
   let worker = null;
   try {
-    // Preprocesar imagen para mejorar calidad OCR
-    const imagenProcesada = await preprocesarImagen(file);
-
-    // Crear worker UNA vez para reutilizarlo en todos los intentos
+    // 1. Creamos el worker y cargamos el idioma
     worker = await Tesseract.createWorker('eng');
-    // Limitar caracteres reconocidos solo a los válidos en las etiquetas
+    
+    // 2. Parámetros básicos para leer la etiqueta (letras y números)
     await worker.setParameters({
       tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      tessedit_pageseg_mode: '7' 
     });
 
-    let codigo = null;
-
-    // Intento 1: imagen procesada + PSM 7 (línea de texto única) ← más preciso
-    await worker.setParameters({ tessedit_pageseg_mode: '7' });
-    const { data: { text: t1 } } = await worker.recognize(imagenProcesada);
-    codigo = extraerCodigo(t1);
-
-    // Intento 2: imagen procesada + PSM 8 (palabra única)
-    if (!codigo) {
-      await worker.setParameters({ tessedit_pageseg_mode: '8' });
-      const { data: { text: t2 } } = await worker.recognize(imagenProcesada);
-      codigo = extraerCodigo(t2);
-    }
-
-    // Intento 3 (último recurso): imagen original sin preprocesar + PSM 7
-    if (!codigo) {
-      await worker.setParameters({ tessedit_pageseg_mode: '7' });
-      const { data: { text: t3 } } = await worker.recognize(file);
-      codigo = extraerCodigo(t3);
-    }
+    // 3. Único escaneo directo al archivo original
+    const { data: { text } } = await worker.recognize(file);
+    const codigo = extraerCodigo(text);
 
     if (codigo) {
       numeroPcDetectado = codigo;
@@ -327,15 +309,17 @@ async function procesarFoto(event) {
       showStatus("✅ ¡Código de PC reconocido con éxito!", "success");
       btnEnviar.disabled = false;
     } else {
-      throw new Error("No se detectó ningún código válido en la imagen.");
+      throw new Error("Lectura fallida");
     }
 
   } catch (error) {
-    showStatus("⚠️ No se leyó claramente el código (Ej: 26A). Enfocá bien la etiqueta blanca pegada al monitor e intentalo de nuevo.", "error");
+    showStatus("⚠️ No se detectó el código. Sacá la foto de nuevo bien de cerca y enfocada (Ej: 26A).", "error");
     inputPc.value      = "";
     btnEnviar.disabled = true;
   } finally {
-    if (worker) await worker.terminate();
+    if (worker) {
+      await worker.terminate(); // Libera la memoria del celular al instante
+    }
     btnFoto.disabled = false;
   }
 }
