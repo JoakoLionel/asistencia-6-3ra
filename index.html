@@ -88,7 +88,6 @@
 </div>
 
 <script>
-// !!! REEMPLAZÁ ESTA URL CON LA DE TU NUEVA IMPLEMENTACIÓN EN APPS SCRIPT !!!
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwznn3--nhkBaAp_x2mFDom9lG0FVOnfvQnGC_U5JpiC9sI0MQ2_g5CvLAkzLcBY2bS/exec"; 
 
 let seguridadQR = { t: null, s: null, g: null };
@@ -166,7 +165,7 @@ async function procesarFoto(event) {
     // Normalizamos el texto quitando espacios y pasando a mayúsculas
     const textoExtraido = result.data.text.toUpperCase().replace(/\s+/g, '');
     
-    // Expresión regular para detectar números seguidos de letras (como '26A')
+    // Expresión regular para detectar números seguidos de letras
     const patronPC = /[0-9]+[A-Z]*/g;
     const coincidencias = textoExtraido.match(patronPC);
 
