@@ -4,8 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Registro de Asistencia - Alumno</title>
-  <!-- Librería Tesseract.js para procesamiento OCR local en el celular -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
   <style>
     :root {
       --primary: #2563eb;
@@ -213,141 +212,46 @@ window.onload = async function () {
 function renderizarFormulario() {
   const container = document.getElementById("form-container");
   container.innerHTML = `
-    <h2>Registro de Asistencia</h2>
-    <p>Ingresá tus datos para dar el presente en la materia actual.</p>
+  <h2>Registro de Asistencia</h2>
+<p>Ingresá tus datos para dar el presente.</p>
 
-    <div class="form-group">
-      <label for="alumno-nombre">Nombre y Apellido completo:</label>
-      <input type="text" id="alumno-nombre" placeholder="Ej: Juan Pérez">
-    </div>
+<div class="form-group">
+  <label for="alumno-nombre">Nombre y Apellido completo:</label>
+  <input type="text" id="alumno-nombre" placeholder="Ej: Juan Pérez" required>
+</div>
 
-    <div class="form-group">
-      <label>Equipo asignado (Captura Requerida):</label>
-      <input type="text" id="alumno-pc" placeholder="Hacé clic abajo para tomar foto" readonly>
-      <input type="file" id="file-input" accept="image/*" capture="environment" style="display: none;" onchange="procesarFoto(event)">
-      <button class="btn btn-secondary" id="btn-foto" onclick="document.getElementById('file-input').click()" style="margin-top: 8px;">📷 Sacar foto al número de PC</button>
-    </div>
+<div class="form-group">
+  <label for="alumno-pc">Número de computadora:</label>
+  <input type="text" id="alumno-pc" placeholder="Ej: PC-12" required>
+</div>
 
-    <button class="btn" id="btn-enviar" onclick="enviarAsistencia()" disabled>Registrar Presente</button>
-    <div id="status-box" class="status-msg"></div>
+<button class="btn" id="btn-enviar" onclick="enviarAsistencia()">
+  Registrar Presente
+</button>
+
+<div id="status-box" class="status-msg"></div>
   `;
 }
 
-// ── FIX OCR: PREPROCESAMIENTO DE IMAGEN ───────────────────
-// Escala 3x + escala de grises + binarización para maximizar
-// la precisión de Tesseract en etiquetas de fondo blanco/texto negro
-function preprocesarImagen(file) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = function () {
-      const ESCALA = 3;
-      const canvas = document.createElement('canvas');
-      const ctx    = canvas.getContext('2d');
-      canvas.width  = img.naturalWidth  * ESCALA;
-      canvas.height = img.naturalHeight * ESCALA;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // Escala de grises + binarización de alto contraste (umbral 140/255)
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const val  = luma > 140 ? 255 : 0;
-        data[i] = data[i + 1] = data[i + 2] = val;
-        data[i + 3] = 255;
-      }
-      ctx.putImageData(imageData, 0, 0);
-      URL.revokeObjectURL(url);
-      canvas.toBlob((blob) => resolve(blob), 'image/png');
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
-    img.src = url;
-  });
-}
 
-// Extrae el código de PC del texto OCR (ej: "26A", "11A")
-function extraerCodigo(text) {
-  const limpio = text.toUpperCase().replace(/\s+/g, '').replace(/[^0-9A-Z]/g, '');
-  // Prioriza: 1-3 dígitos + una letra mayúscula (formato estándar de etiquetas)
-  const conLetra  = limpio.match(/\d{1,3}[A-Z]/g);
-  const soloNum   = limpio.match(/\d{2,3}/g);
-  const candidatos = conLetra || soloNum || [];
-  return candidatos.find(c => c.length >= 2 && c.length <= 4) || null;
-}
 
-// ── FIX OCR: MÓDULO PRINCIPAL CON WORKER Y 3 INTENTOS ─────
-async function procesarFoto(event) {
-  const file = event.target.files[0];
-  if (!file) return;
 
-  const btnFoto   = document.getElementById("btn-foto");
-  const inputPc   = document.getElementById("alumno-pc");
-  const btnEnviar = document.getElementById("btn-enviar");
-
-  btnFoto.disabled = true;
-  showStatus("⏳ Analizando la etiqueta del equipo... Esperá un momento.", "info");
-
-  let worker = null;
-  try {
-    // Preprocesar imagen para mejorar calidad OCR
-    const imagenProcesada = await preprocesarImagen(file);
-
-    // Crear worker UNA vez para reutilizarlo en todos los intentos
-    worker = await Tesseract.createWorker('eng');
-    // Limitar caracteres reconocidos solo a los válidos en las etiquetas
-    await worker.setParameters({
-      tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    });
-
-    let codigo = null;
-
-    // Intento 1: imagen procesada + PSM 7 (línea de texto única) ← más preciso
-    await worker.setParameters({ tessedit_pageseg_mode: '7' });
-    const { data: { text: t1 } } = await worker.recognize(imagenProcesada);
-    codigo = extraerCodigo(t1);
-
-    // Intento 2: imagen procesada + PSM 8 (palabra única)
-    if (!codigo) {
-      await worker.setParameters({ tessedit_pageseg_mode: '8' });
-      const { data: { text: t2 } } = await worker.recognize(imagenProcesada);
-      codigo = extraerCodigo(t2);
-    }
-
-    // Intento 3 (último recurso): imagen original sin preprocesar + PSM 7
-    if (!codigo) {
-      await worker.setParameters({ tessedit_pageseg_mode: '7' });
-      const { data: { text: t3 } } = await worker.recognize(file);
-      codigo = extraerCodigo(t3);
-    }
-
-    if (codigo) {
-      numeroPcDetectado = codigo;
-      inputPc.value     = `Equipo Detectado: ${numeroPcDetectado}`;
-      showStatus("✅ ¡Código de PC reconocido con éxito!", "success");
-      btnEnviar.disabled = false;
-    } else {
-      throw new Error("No se detectó ningún código válido en la imagen.");
-    }
-
-  } catch (error) {
-    showStatus("⚠️ No se leyó claramente el código (Ej: 26A). Enfocá bien la etiqueta blanca pegada al monitor e intentalo de nuevo.", "error");
-    inputPc.value      = "";
-    btnEnviar.disabled = true;
-  } finally {
-    if (worker) await worker.terminate();
-    btnFoto.disabled = false;
-  }
-}
+  
 
 // ── ENVÍO DE DATOS Y BLOQUEO DEFINITIVO ───────────────────
 async function enviarAsistencia() {
-  const nombre    = document.getElementById("alumno-nombre").value.trim();
-  const btn       = document.getElementById("btn-enviar");
+  const nombre = document.getElementById("alumno-nombre").value.trim();
+  const numeroPC = document.getElementById("alumno-pc").value.trim();
+
+  const btn = document.getElementById("btn-enviar");
   const container = document.getElementById("form-container");
 
-  if (!nombre || !numeroPcDetectado) {
-    showStatus("⚠️ Datos incompletos. Completá tu nombre y sacá la foto a la etiqueta.", "error");
+  if (!nombre || !numeroPC) {
+    showStatus(
+      "⚠️ Debés completar el nombre y apellido y el número de computadora.",
+      "error"
+    );
     return;
   }
 
@@ -355,13 +259,12 @@ async function enviarAsistencia() {
   showStatus("⏳ Subiendo tu asistencia a la planilla de Google...", "info");
 
   try {
-    const paqueteAsistencia = {
-      nombreAlumno: nombre,
-      numeroPC:     numeroPcDetectado,
-      ts:           seguridadQR.s,
-      token:        seguridadQR.t
-    };
-
+   const paqueteAsistencia = {
+  nombreAlumno: nombre,
+  numeroPC: numeroPC,
+  ts: seguridadQR.s,
+  token: seguridadQR.t
+};
     // Petición POST al Web App de Google Sheets
     await fetch(APPS_SCRIPT_URL, {
       method:  "POST",
